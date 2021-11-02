@@ -1,4 +1,3 @@
-; https://www.smwcentral.net/?p=section&a=details&id=19484
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
 ;; SMW Bob-omb (sprite 0D), by mellonpizza
@@ -71,6 +70,24 @@ macro localJSL(dest, rtlop, db)
 	PLB			;restore our own DB
 endmacro
 
+macro FaceMario()
+	%SubHorzPos()
+	tya : sta !sprite_direction,x
+endmacro
+
+macro SetAnimationFrame()
+	;; Change animation image every 8 cycles
+	inc !1570,x
+	lda !1570,x : lsr #3 : and #$01 : sta !1602,x
+endmacro
+
+macro IsOnGround()
+	lda !sprite_blocked_status,x : and #$04
+endmacro
+
+macro IsTouchingCeiling()
+	lda !sprite_blocked_status,x : and #$08
+endmacro
 
 print "INIT ",pc
 	;; Set timer for FF
@@ -80,25 +97,8 @@ print "INIT ",pc
 	lda !extra_bits,x : and #$04 : beq +
 	lda #$09 : sta !14C8,x
 	+
-	jsr FaceMario
+	%FaceMario()
 	rtl
-
-FaceMario:
-	%SubHorzPos()
-	tya : sta !sprite_direction,x
-	rts
-
-IsOnGround:
-	lda !sprite_blocked_status,x : and #$04 : rts
-
-IsTouchingCeiling:
-	lda !sprite_blocked_status,x : and #$08 : rts
-
-SetAnimationFrame:
-	;; Change animation image every 8 cycles
-	inc !1570,x
-	lda !1570,x : lsr #3 : and #$01 : sta !1602,x
-	rts
 
 Spr0to13SpeedX:
 	db $0C,$F4
@@ -227,7 +227,7 @@ Spr0to13Start:
 	jmp .graphics
 	+
 	;; Branch if not on ground
-	jsr IsOnGround : beq .In_Air
+	%IsOnGround() : beq .In_Air
 
 	;; Set X speed factoring slope
 	ldy !sprite_direction,x
@@ -243,16 +243,16 @@ Spr0to13Start:
 	stz !sprite_speed_x,x
 	+
 	;; Clear Y speed if touching ceiling
-	jsr IsTouchingCeiling : beq +
+	%IsTouchingCeiling() : beq +
 	stz !sprite_speed_y,x
 	+
 	;; Offscreen + Speed update
 	lda #$00 : %SubOffScreen()
 	jsl $01802A|!BankB
-	jsr SetAnimationFrame
+	%SetAnimationFrame()
 
 	;; Branch if not on ground
-	jsr IsOnGround : beq .SpriteInAir
+	%IsOnGround() : beq .SpriteInAir
 
 	;; Yspeedthings
 	lda !sprite_blocked_status,x : bmi ++
@@ -267,7 +267,7 @@ Spr0to13Start:
 	;; Turn around when timer is set as needed
 	lda !sprite_anim_counter,x : and #$7F : bne +
 	lda !sprite_direction,x : pha
-	jsr FaceMario
+	%FaceMario()
 	pla : cmp !sprite_direction,x : beq +
 	lda #$08 : sta !sprite_turn_timer,x
 	+
@@ -309,12 +309,12 @@ status9_Bobomb_Stunned:
 	jsl $01802A|!BankB
 
 	;; Handle touching the ground
-	jsr IsOnGround : beq .Not_Touching_Ground
+	%IsOnGround() : beq .Not_Touching_Ground
 	jsr Handle_Touch_Ground
 
 .Not_Touching_Ground
 	;; Handle touching the ceiling
-	jsr IsTouchingCeiling : beq .Not_Touching_Ceiling
+	%IsTouchingCeiling() : beq .Not_Touching_Ceiling
 
 	;; Set downward speed
 	lda #$10 : sta !sprite_speed_y,x
