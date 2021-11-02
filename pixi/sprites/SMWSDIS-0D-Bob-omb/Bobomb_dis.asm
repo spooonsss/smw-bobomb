@@ -1,3 +1,4 @@
+; https://www.smwcentral.net/?p=section&a=details&id=19484
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
 ;; SMW Bob-omb (sprite 0D), by mellonpizza
@@ -56,9 +57,27 @@ db $40,$00
 !OAM_Tile = $0302|!Base2
 !OAM_Prop = $0303|!Base2
 
+macro localJSL(dest, rtlop, db)
+	; assert read1(<db><<16+<rtlop>) == $6B, "rtl op should point to a rtl"
+	PHB			;first save our own DB
+	PHK			;first form 24bit return address
+	PEA.w ?return-1
+	PEA.w <rtlop>-1		;second comes 16bit return address
+	PEA.w <db><<8|<db>	;change db to desired value
+	PLB
+	PLB
+	JML <dest>
+?return:
+	PLB			;restore our own DB
+endmacro
+
+
 print "INIT ",pc
 	;; Set timer for FF
 	lda.b #!FuseTimer : sta !1540,x
+
+	LDA #$00
+	STA !1504,x
 	
 	;; Set to stunned if extra bit
 	lda !extra_bits,x : and #$04 : beq +
@@ -96,29 +115,118 @@ Spr0to13SpeedX:
 print "MAIN ",pc
 	;; Handle which state to manage
 	phb : phk : plb
-	lda !sprite_status,x : cmp #$08 : bne +
-	jsr Bobomb_Main : bra ++
-	+
-	cmp #$09 : bne +
-	jsr Bobomb_Stunned : bra ++
-	+
-	jsr HandleSprCarried
-	++
-	;; Set sprite to handle vanilla settings if needed
-	ldy #$00
-	lda !sprite_status,x : cmp #$08 : bcc +
-	ldy #$80
-	+
-	tya : sta !extra_prop_2,x
+	jsr main
 	plb : rtl
+
+
+main:
+	lda !sprite_status,x
+
+	JSL $0086DF|!BankB ; execute_pointer
+    dw status0_empty
+    dw status1_init
+    dw status2_dead
+    dw status3_smushed
+    dw status4_spinjumped
+    dw status5_sinking_in_lava
+    dw status6_goal_tape_coin
+    dw status7_in_yoshi_mouth
+	; state 8 has two substates:
+	;   !1534==0: walking
+	;   !1534==1: exploding
+    dw status8_Bobomb_Main
+	dw status9_Bobomb_Stunned
+	dw statusab_HandleSprCarried
+    dw statusab_HandleSprCarried
+
+
+status0_empty:
+status1_init:
+status3_smushed:
+status7_in_yoshi_mouth:
+	RTS ; should be unreachable
+
+status4_spinjumped:
+	%localJSL($019A52|!BankB, $9D66, $01|(!BankB>>16)) ; HandleSprSpinJump
+	RTS
+
+status6_goal_tape_coin:
+	JSL $00FBAC|!BankB ; LvlEndSprCoins
+	RTS
+
+status5_sinking_in_lava:
+HandleSprLava:                  ;-----------| Routine to handle a sprite killed by lava (sprite status 5).
+	; set tweaker to draw ourselves
+    LDA.w !167A,X
+    ORA.b #$01
+	STA.w !167A,x
+
+	; use 1504 to prevent recursion
+	LDA !1504,x
+	BNE ++
+	LDA #$01
+	STA !1504,x
+	%localJSL($019A7B|!BankB, $9D66, $01|(!BankB>>16)) ; HandleSprLava
+	LDA #$00
+	STA !1504,x
+	JSR Bobomb_Draw
+++
+	rts    
+
+	JSR Bobomb_Draw
+	lda !LockAnimationFlag
+	beq +
+	rts
++
+
+    LDA.w !1558,X ; lava timer
+	BNE +
+    STZ.w !sprite_status,X ; timer ran out; erase sprite
+    LDY.w !161A,X
+    LDA.b #$00
+    STA.w !1938,Y ; don't respawn
+	RTS
++
+    LDA.b #$04                  ;$019A80    | Sinking Y speed.
+    STA $AA,X                   ;$019A82    |
+    ASL.w !190F,X               ;$019A84    |\ Ignore walls.
+    LSR.w !190F,X               ;$019A87    |/
+    LDA !B6,X                   ;$019A8A    |\ 
+    BEQ CODE_019A9D             ;$019A8C    || Slow down the sprite horizontally.
+    BPL CODE_019A94             ;$019A8E    ||
+    INC !B6,X                   ;$019A90    ||
+    BRA CODE_019A9D             ;$019A92    || [change to BRA #$02 to fix a bug where sprites will slide through blocks when moving left]
+CODE_019A94:                    ;           ||
+    DEC !B6,X                   ;$019A94    |/
+    ;JSR IsTouchingObjSide       ;$019A96    |\ 
+    LDA.w !1588,X
+    AND.b #$03
+    BEQ CODE_019A9D             ;$019A99    || Clear X speed if it hits a block (...but only when going right)
+    STZ !B6,X                   ;$019A9B    |/
+CODE_019A9D:                    ;           |
+    LDA.b #$01                  ;$019A9D    |\ Send the sprite behind objects.
+    STA.w !1632,X               ;$019A9F    |/
+
+	BRA +
+status2_dead:
+	JSR Bobomb_Draw
+	lda !LockAnimationFlag
+	beq +
+	rts
++
+
+	lda #$00 : %SubOffScreen()
+	jsl $01802A|!BankB ; SubUpdateSprPos update position with gravity
+
+	rts
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;							;;
 ;;		Main routine		;;
 ;;							;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-Bobomb_Main:
-	;; Handle explosion if time to explode
+status8_Bobomb_Main:
+	;; Handle explosion if in explode state
 	lda !1534,x : bne ExplodeBomb
 
 	;; Branch if not on detonation timer
@@ -126,7 +234,7 @@ Bobomb_Main:
 
 	;; Set sprite status to stunned
 	;; Time until explosion = #$40
-	lda #$09 : sta !14C8,x
+	lda #$09 : sta !sprite_status,x
 	lda #$40 : sta !1540,x
 	jmp Bobomb_Draw
 
@@ -191,11 +299,8 @@ Spr0to13Start:
 	stz !1570,x
 	+
 	;; Interact with mario/sprites
-	lda !sprite_tweaker_167a,x : pha
-	and #$7F : sta !sprite_tweaker_167a,x
-	jsl $01A7DC|!BankB
-	pla : sta !sprite_tweaker_167a,x
-	jsl $018032|!BankB
+	jsl $01A7DC|!BankB ; MarioSprInteract
+	jsl $018032|!BankB ; SprSprInteract
 
 	;; Flip sprite direction if touching block from side
 	lda !sprite_direction,x : inc a
@@ -210,7 +315,7 @@ Spr0to13Start:
 ;;		Stunned routine		;;
 ;;							;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-Bobomb_Stunned:
+status9_Bobomb_Stunned:
 	;; Always draw a specific frame
 	stz !1602,x
 	lda !LockAnimationFlag : beq +
@@ -296,7 +401,7 @@ BombInteract:
 	lda !PlayerRideYoshi : beq +
 	jsl $01AA33|!BankB
 	+
-	;; Setup sprite state 4 and reset timer
+	;; Setup sprite state 4 (Killed with a spinjump) and reset timer
 	lda #$04 : sta !sprite_status,x
 	lda #$1F : sta !1540,x
 	
@@ -360,7 +465,7 @@ Check_Fuse:
 	;; Branch away if it's not time to explode
 	lda !1540,x : cmp #$01 : bne .dont_explode
 
-	;; SFX, explode status, explode timer, normal sprie status,
+	;; SFX, explode status, explode timer, normal sprite status,
 	lda.b #!ExplosionSFX : sta.w !ExplosionBank|!Base2
 	lda #$01 : sta !1534,x
 	lda.b #!ExplosionTimer : sta !1540,x
@@ -369,7 +474,7 @@ Check_Fuse:
 	;; set to interact with other sprites
 	lda !sprite_tweaker_1686,x : and #$F7 : sta !sprite_tweaker_1686,x
 	
-	;; set to default interaction
+	;; set to default interaction with mario
 	lda !sprite_tweaker_167a,x : and #$7F : sta !sprite_tweaker_167a,x
 	rts
 
@@ -378,6 +483,7 @@ Check_Fuse:
 	cmp #$40
 	bcs .return
 	asl : and #$0E : eor !sprite_oam_properties,x : sta !sprite_oam_properties,x
+	; EOR.w $15F6,X               ;$019655    ||
 .return
 	rts
 
@@ -465,7 +571,7 @@ FlipSpriteDir:
 ;;		Carried routine			;;
 ;;								;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-HandleSprCarried:
+statusab_HandleSprCarried:
 	;; Handles all the logic for carrying sprites
 	jsr Carried_Sprite_Main
 
@@ -554,7 +660,16 @@ TossUpSprCarried:
 KickSprCarried:
 	;; Set stun timer
 	lda.b #!FuseTimer : sta !1540,x
-	
+	; Reset to original palette
+	lda !sprite_oam_properties,x
+	and #$FF-$0E
+	sta !sprite_oam_properties,x
+
+	lda !166E,x
+	and #$0E
+	ora !sprite_oam_properties,x
+	sta !sprite_oam_properties,x
+
 	;; Display contact graphic
 	jsl $01AB6F|!BankB
 
@@ -655,6 +770,16 @@ Bobomb_Draw:
 	lda BobombTiles,x : sta !OAM_Tile,y
 	lda $02 : sta !OAM_Prop,y
 	plx
+
+	; y-flip if dead
+	lda !sprite_status,x
+	cmp #$08
+	bcs +
+	lda $02
+	ora #$80
+	sta !OAM_Prop,y
+
++
 	lda #$00 : ldy #$02
 	jsl $01B7B3|!BankB
-	rts 
+	rts
