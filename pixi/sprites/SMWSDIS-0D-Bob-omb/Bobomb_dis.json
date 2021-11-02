@@ -27,7 +27,7 @@
     "Can't be kicked like shell": true,
     "Process interaction with Mario every frame": false,
     "Gives power-up when eaten by yoshi": false,
-    "Don't use default interaction with Mario": false
+    "Don't use default interaction with Mario": true
   },
   "$1686": {
     "Inedible": false,

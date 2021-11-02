@@ -6,7 +6,7 @@
 ;; This is a disassembly of sprite 0D in SMW, the bob-omb.
 ;;
 ;; Uses first extra bit: YES
-;; 
+;;
 ;; If the extra bit is set, the sprite spawns in its stunned state right away.
 ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -75,9 +75,6 @@ endmacro
 print "INIT ",pc
 	;; Set timer for FF
 	lda.b #!FuseTimer : sta !1540,x
-
-	LDA #$00
-	STA !1504,x
 	
 	;; Set to stunned if extra bit
 	lda !extra_bits,x : and #$04 : beq +
@@ -115,29 +112,28 @@ Spr0to13SpeedX:
 print "MAIN ",pc
 	;; Handle which state to manage
 	phb : phk : plb
-	jsr main
+	jsr status_dispatch
 	plb : rtl
 
 
-main:
-	lda !sprite_status,x
-
+status_dispatch:
+	LDA !sprite_status,x
 	JSL $0086DF|!BankB ; execute_pointer
-    dw status0_empty
-    dw status1_init
-    dw status2_dead
-    dw status3_smushed
-    dw status4_spinjumped
-    dw status5_sinking_in_lava
-    dw status6_goal_tape_coin
-    dw status7_in_yoshi_mouth
+	dw status0_empty
+	dw status1_init
+	dw status2_dead
+	dw status3_smushed
+	dw status4_spinjumped
+	dw status5_sinking_in_lava
+	dw status6_goal_tape_coin
+	dw status7_in_yoshi_mouth
 	; state 8 has two substates:
 	;   !1534==0: walking
 	;   !1534==1: exploding
-    dw status8_Bobomb_Main
+	dw status8_Bobomb_Main
 	dw status9_Bobomb_Stunned
 	dw statusab_HandleSprCarried
-    dw statusab_HandleSprCarried
+	dw statusab_HandleSprCarried
 
 
 status0_empty:
@@ -155,57 +151,39 @@ status6_goal_tape_coin:
 	RTS
 
 status5_sinking_in_lava:
-HandleSprLava:                  ;-----------| Routine to handle a sprite killed by lava (sprite status 5).
-	; set tweaker to draw ourselves
-    LDA.w !167A,X
-    ORA.b #$01
-	STA.w !167A,x
-
-	; use 1504 to prevent recursion
-	LDA !1504,x
-	BNE ++
-	LDA #$01
-	STA !1504,x
-	%localJSL($019A7B|!BankB, $9D66, $01|(!BankB>>16)) ; HandleSprLava
-	LDA #$00
-	STA !1504,x
 	JSR Bobomb_Draw
-++
-	rts    
-
-	JSR Bobomb_Draw
-	lda !LockAnimationFlag
-	beq +
-	rts
-+
-
-    LDA.w !1558,X ; lava timer
-	BNE +
-    STZ.w !sprite_status,X ; timer ran out; erase sprite
-    LDY.w !161A,X
-    LDA.b #$00
-    STA.w !1938,Y ; don't respawn
+	LDA !LockAnimationFlag
+	BEQ +
 	RTS
 +
-    LDA.b #$04                  ;$019A80    | Sinking Y speed.
-    STA $AA,X                   ;$019A82    |
-    ASL.w !190F,X               ;$019A84    |\ Ignore walls.
-    LSR.w !190F,X               ;$019A87    |/
-    LDA !B6,X                   ;$019A8A    |\ 
-    BEQ CODE_019A9D             ;$019A8C    || Slow down the sprite horizontally.
-    BPL CODE_019A94             ;$019A8E    ||
-    INC !B6,X                   ;$019A90    ||
-    BRA CODE_019A9D             ;$019A92    || [change to BRA #$02 to fix a bug where sprites will slide through blocks when moving left]
-CODE_019A94:                    ;           ||
-    DEC !B6,X                   ;$019A94    |/
-    ;JSR IsTouchingObjSide       ;$019A96    |\ 
-    LDA.w !1588,X
-    AND.b #$03
-    BEQ CODE_019A9D             ;$019A99    || Clear X speed if it hits a block (...but only when going right)
-    STZ !B6,X                   ;$019A9B    |/
-CODE_019A9D:                    ;           |
-    LDA.b #$01                  ;$019A9D    |\ Send the sprite behind objects.
-    STA.w !1632,X               ;$019A9F    |/
+; based on HandleSprLava ($019A7B) Routine to handle a sprite killed by lava (sprite status 5).
+	LDA.w !1558,X ; lava timer
+	BNE +
+	STZ.w !sprite_status,X ; timer ran out; erase sprite
+	LDY.w !161A,X
+	LDA.b #$00
+	STA.w !1938,Y ; don't respawn
+	RTS
++
+	LDA.b #$04 ; Sinking Y speed.
+	STA $AA,X
+	ASL.w !190F,X               ; |\ Ignore walls when moving
+	LSR.w !190F,X               ; |/
+	LDA !B6,X                   ; |\
+	BEQ .after_speed_adjustment ; || Slow down the sprite horizontally.
+	BPL .rightward_horiz_speed  ; ||
+	INC !B6,X                   ; ||
+	BRA +                       ; ||
+.rightward_horiz_speed:         ; ||
+	DEC !B6,X                   ; |/
++
+	LDA.w !1588,X
+	AND.b #$03                  ; | Sprite is blocked from left or right
+	BEQ .after_speed_adjustment ; |\ Clear X speed if it hits a block
+	STZ !B6,X                   ; |/
+.after_speed_adjustment:        ; |
+	LDA.b #$01                  ; |\ Send the sprite behind objects.
+	STA.w !1632,X               ; |/
 
 	BRA +
 status2_dead:
@@ -299,7 +277,10 @@ Spr0to13Start:
 	stz !1570,x
 	+
 	;; Interact with mario/sprites
+	lda !sprite_tweaker_167a,x : pha
+	and #$7F : sta !sprite_tweaker_167a,x
 	jsl $01A7DC|!BankB ; MarioSprInteract
+	pla : sta !sprite_tweaker_167a,x
 	jsl $018032|!BankB ; SprSprInteract
 
 	;; Flip sprite direction if touching block from side
@@ -369,7 +350,7 @@ status9_Bobomb_Stunned:
 .Not_Touching_Side
 	;; Interact with sprites.
 	jsl $018032|!BankB
-	
+
 	;; Interact with player. 'PowInteract' extracted from default interaction handler.
 	jsl $01A7DC|!BankB : bcc +
 	jsr BombInteract
@@ -388,15 +369,15 @@ BombInteract:
 	stz $18D2|!Base2
 	lda !154C,x : bne .return2
 	lda #$08 : sta !154C,x
-	
+
 	;; Test whether to handle being spinjumped on
 	lda $140D|!Base2 : ora !PlayerRideYoshi : beq .NoSpinjump
 	lda !PlayerYSpeed : bmi .NoSpinjump
-	
+
 	;; Display contact graphic and set speed
 	jsl $01AB99|!BankB
 	lda #$F8 : sta !PlayerYSpeed
-	
+
 	;; Only factor high bounding if player is on yoshi
 	lda !PlayerRideYoshi : beq +
 	jsl $01AA33|!BankB
@@ -404,10 +385,10 @@ BombInteract:
 	;; Setup sprite state 4 (Killed with a spinjump) and reset timer
 	lda #$04 : sta !sprite_status,x
 	lda #$1F : sta !1540,x
-	
+
 	;; Generate smoke
 	jsl $07FC3B|!BankB
-	
+
 	;; Factor enemies stomped
 	phy
 	lda $1697|!Base2 : clc : adc !1626,x
@@ -425,7 +406,7 @@ BombInteract:
 	lda #$08 : sta $1DF9|!Base2
 .return2
 	rts
-	
+
 .stomp_scores
 db $13,$14,$15,$16,$17,$18,$19
 
@@ -470,10 +451,10 @@ Check_Fuse:
 	lda #$01 : sta !1534,x
 	lda.b #!ExplosionTimer : sta !1540,x
 	lda #$08 : sta !sprite_status,x
-	
+
 	;; set to interact with other sprites
 	lda !sprite_tweaker_1686,x : and #$F7 : sta !sprite_tweaker_1686,x
-	
+
 	;; set to default interaction with mario
 	lda !sprite_tweaker_167a,x : and #$7F : sta !sprite_tweaker_167a,x
 	rts
@@ -483,7 +464,6 @@ Check_Fuse:
 	cmp #$40
 	bcs .return
 	asl : and #$0E : eor !sprite_oam_properties,x : sta !sprite_oam_properties,x
-	; EOR.w $15F6,X               ;$019655    ||
 .return
 	rts
 
@@ -620,7 +600,7 @@ Carried_Sprite_Main:
 ReleaseSprCarried:
 	;; Clear number of enemies killed.
 	stz !1626,x
-	
+
 	;; Clear Y speed and set to stunned state.
 	stz !sprite_speed_y,x
 	lda #$09 : sta !sprite_status,x
