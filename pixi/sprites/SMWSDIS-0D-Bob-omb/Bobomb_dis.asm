@@ -166,7 +166,7 @@ status5_sinking_in_lava:
 	RTS
 +
 	LDA.b #$04 ; Sinking Y speed.
-	STA $AA,X
+	STA !AA,X
 	ASL.w !190F,X               ; |\ Ignore walls when moving
 	LSR.w !190F,X               ; |/
 	LDA !B6,X                   ; |\
