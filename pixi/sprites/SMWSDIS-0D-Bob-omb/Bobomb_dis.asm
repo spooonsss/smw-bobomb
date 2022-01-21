@@ -89,6 +89,18 @@ macro IsTouchingCeiling()
 	lda !sprite_blocked_status,x : and #$08
 endmacro
 
+macro ResetToOriginalPalette()
+	lda !sprite_oam_properties,x
+	and #$FF-$0E
+	sta !sprite_oam_properties,x
+
+	lda !166E,x
+	and #$0E
+	ora !sprite_oam_properties,x
+	sta !sprite_oam_properties,x
+endmacro
+
+
 print "INIT ",pc
 	;; Set timer for FF
 	lda.b #!FuseTimer : sta !1540,x
@@ -432,6 +444,7 @@ endif
 	lda #$09 : sta !sprite_status,x
 	lda.b #!FuseTimer : sta !1540,x
 	lda #$10 : sta !154C,x
+	%ResetToOriginalPalette()
 	%SubHorzPos()
 	lda ShellSpeedX,y
 	sta !sprite_speed_x,x
@@ -640,15 +653,7 @@ TossUpSprCarried:
 KickSprCarried:
 	;; Set stun timer
 	lda.b #!FuseTimer : sta !1540,x
-	; Reset to original palette
-	lda !sprite_oam_properties,x
-	and #$FF-$0E
-	sta !sprite_oam_properties,x
-
-	lda !166E,x
-	and #$0E
-	ora !sprite_oam_properties,x
-	sta !sprite_oam_properties,x
+	%ResetToOriginalPalette()
 
 	;; Display contact graphic
 	jsl $01AB6F|!BankB
